@@ -1,24 +1,21 @@
-# Schedulr-Ai
-Scheduling + booking links + Google Calendar sync, with AI insights.
+# Schedulr AI
 
-Web
-Next.js + TypeScript (public booking page + admin)
-Tailwind + a calendar component (FullCalendar or React Big Calendar)
+Scheduling + booking links for small businesses, with Google Calendar synchronization and future AI-powered insights.
 
-API
-FastAPI (Python) (pairs well with later ML)
-Postgres + SQLAlchemy + Alembic
+## What it does (v0)
+- Public booking link per business: `/b/{slug}`
+- Conflict-safe booking API
+- Google Calendar sync (phase 1: push events on booking)
+- Email confirmation / reminders (phase 1: email only)
 
-Jobs + email
-Redis + Celery (reminders, calendar sync retries)
-Email provider: SendGrid (later) / Resend (simple)
+## Stack
+- Web: Next.js + TypeScript
+- API: FastAPI + SQLAlchemy + Alembic
+- DB: Postgres
+- Queue (later): Redis + Celery
+- Dev: Docker Compose, GitHub Actions CI
 
-Auth + OAuth
-Auth: NextAuth (works well with Google)
-Google OAuth scopes for Calendar
-
-Infra
-Docker + Docker Compose (local)
-
-GitHub Actions (CI)
-Deploy later: Vercel (web) + Render/Fly/AWS (api)
+## Local dev
+```bash
+cp apps/api/.env.example apps/api/.env
+make dev
