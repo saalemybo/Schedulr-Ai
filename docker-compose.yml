@@ -16,6 +16,9 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: schedulr_api
+    env_file:
+      - ./apps/api/.env
+
     ports:
       - "8000:8000"
     volumes:
