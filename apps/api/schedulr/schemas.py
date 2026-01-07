@@ -54,6 +54,7 @@ class AppointmentOut(BaseModel):
     start_at: datetime
     end_at: datetime
     status: str
+    
 
     class Config:
         from_attributes = True

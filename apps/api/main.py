@@ -4,10 +4,14 @@ from datetime import datetime, time, timedelta
 from schedulr.db import engine, get_db
 from schedulr.models import Base, Business, Service, Availability, Appointment
 from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut
+from schedulr.google_calendar import build_oauth_flow, get_calendar_service, make_event_payload
+from schedulr.models import GoogleCalendarConnection
+import os
+
 
 app = FastAPI(title="Schedulr AI API", version="0.0.2")
 
-# DEV ONLY: auto-create tables on startup
+#auto-create tables on startup
 Base.metadata.create_all(bind=engine)
 
 #Helpers for time and weekday parsing
@@ -156,7 +160,85 @@ def create_appointment(payload: AppointmentCreate, db: Session = Depends(get_db)
     db.add(appt)
     db.commit()
     db.refresh(appt)
+
+    # Google Calendar push (Phase 1)
+    conn = (
+        db.query(GoogleCalendarConnection)
+        .filter(GoogleCalendarConnection.business_id == business.id)
+        .first()
+    )
+    if conn:
+        svc = get_calendar_service(conn.refresh_token)
+        event = make_event_payload(
+            summary=f"{service.name} - {payload.customer_name}",
+            start_at=start_at,
+            end_at=end_at,
+            description=f"Booked via Schedulr AI. Customer: {payload.customer_email}",
+        )
+        created = svc.events().insert(calendarId=conn.calendar_id, body=event).execute()
+        appt.google_event_id = created.get("id")
+        db.commit()
+        db.refresh(appt)
+
     return appt
+
+@app.get("/integrations/google/start")
+def google_start(business_slug: str, db: Session = Depends(get_db)):
+    # Make sure business exists
+    business = db.query(Business).filter(Business.slug == business_slug).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    flow = build_oauth_flow()
+
+    # IMPORTANT: set state to the business slug so callback can find it
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state=business_slug,
+    )
+
+    return {"auth_url": auth_url}
+
+
+@app.get("/integrations/google/callback")
+def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+    # Google returns `state` -> we use it as the business slug
+    business = db.query(Business).filter(Business.slug == state).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    flow = build_oauth_flow()
+    flow.fetch_token(code=code)
+
+    creds = flow.credentials
+    if not creds.refresh_token:
+        raise HTTPException(
+            status_code=400,
+            detail="no refresh_token returned; revoke app access in Google and reconnect",
+        )
+
+    existing = (
+        db.query(GoogleCalendarConnection)
+        .filter(GoogleCalendarConnection.business_id == business.id)
+        .first()
+    )
+    if existing:
+        existing.refresh_token = creds.refresh_token
+        existing.calendar_id = "primary"
+    else:
+        db.add(
+            GoogleCalendarConnection(
+                business_id=business.id,
+                refresh_token=creds.refresh_token,
+                calendar_id="primary",
+            )
+        )
+
+    db.commit()
+    return {"status": "connected", "business_slug": business.slug, "calendar_id": "primary"}
+
 
 
 

@@ -58,6 +58,20 @@ class Appointment(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="booked")
 
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    google_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+
+class GoogleCalendarConnection(Base):
+    __tablename__ = "google_calendar_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), unique=True, index=True)
+
+    refresh_token: Mapped[str] = mapped_column(String(2048), nullable=False)
+    calendar_id: Mapped[str] = mapped_column(String(255), nullable=False, default="primary")
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 
