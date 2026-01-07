@@ -2,8 +2,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
 from schedulr.db import engine, get_db
-from schedulr.models import Base, Business
-from schedulr.schemas import BusinessCreate, BusinessOut
+from schedulr.models import Base, Business, Service
+from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut
 
 app = FastAPI(title="Schedulr AI API", version="0.0.2")
 
@@ -35,3 +35,26 @@ def get_business(slug: str, db: Session = Depends(get_db)):
     if not b:
         raise HTTPException(status_code=404, detail="business not found")
     return b
+
+@app.post("/businesses/{slug}/services", response_model=ServiceOut)
+def create_service(slug: str, payload: ServiceCreate, db: Session = Depends(get_db)):
+    business = db.query(Business).filter(Business.slug == slug).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    svc = Service(business_id=business.id, name=payload.name, duration_min=payload.duration_min)
+    db.add(svc)
+    db.commit()
+    db.refresh(svc)
+    return svc
+
+
+@app.get("/businesses/{slug}/services", response_model=list[ServiceOut])
+def list_services(slug: str, db: Session = Depends(get_db)):
+    business = db.query(Business).filter(Business.slug == slug).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    services = db.query(Service).filter(Service.business_id == business.id).order_by(Service.id.asc()).all()
+    return services
+
