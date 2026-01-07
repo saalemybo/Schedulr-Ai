@@ -1,14 +1,9 @@
-from sqlalchemy import DateTime, Integer, String, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     pass
-
-
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
 
 #business table storing business info and included services
 class Business(Base):
@@ -21,6 +16,7 @@ class Business(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     services: Mapped[list["Service"]] = relationship(back_populates="business", cascade="all, delete-orphan")
+    availability: Mapped[list["Availability"]] = relationship(back_populates="business", cascade="all, delete-orphan")
 
 #service table storing services offered by businesses
 class Service(Base):
@@ -32,4 +28,17 @@ class Service(Base):
     duration_min: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
 
     business: Mapped["Business"] = relationship(back_populates="services")
+
+
+class Availability(Base):
+    __tablename__ = "availability"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), index=True)
+    day_of_week: Mapped[str] = mapped_column(String(16), nullable=False)  # "mon", "tue", etc.
+    open_time: Mapped[str] = mapped_column(String(5), nullable=False)     # "09:00"
+    close_time: Mapped[str] = mapped_column(String(5), nullable=False)    # "17:00"
+
+    business: Mapped["Business"] = relationship(back_populates="availability")
+
 

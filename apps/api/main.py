@@ -2,8 +2,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
 from schedulr.db import engine, get_db
-from schedulr.models import Base, Business, Service
-from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut
+from schedulr.models import Base, Business, Service, Availability
+from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate
 
 app = FastAPI(title="Schedulr AI API", version="0.0.2")
 
@@ -57,4 +57,24 @@ def list_services(slug: str, db: Session = Depends(get_db)):
 
     services = db.query(Service).filter(Service.business_id == business.id).order_by(Service.id.asc()).all()
     return services
+
+from schedulr.models import Availability
+from schedulr.schemas import AvailabilityCreate
+
+@app.post("/availability", status_code=201)
+def add_availability(payload: AvailabilityCreate, db: Session = Depends(get_db)):
+    business = db.query(Business).filter(Business.id == payload.business_id).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    a = Availability(
+        business_id=payload.business_id,
+        day_of_week=payload.day_of_week,
+        open_time=payload.open_time,
+        close_time=payload.close_time
+    )
+    db.add(a)
+    db.commit()
+    return {"status": "saved"}
+
 

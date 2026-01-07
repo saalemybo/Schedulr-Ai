@@ -29,3 +29,10 @@ class ServiceOut(BaseModel):
     class Config:
         from_attributes = True
 
+class AvailabilityCreate(BaseModel):
+    business_id: int
+    day_of_week: str = Field(pattern="^(mon|tue|wed|thu|fri|sat|sun)$")
+    open_time: str = Field(pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    close_time: str = Field(pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
