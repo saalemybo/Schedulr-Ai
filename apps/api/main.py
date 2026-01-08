@@ -1,12 +1,14 @@
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date as date_type
 from schedulr.db import engine, get_db
 from schedulr.models import Base, Business, Service, Availability, Appointment
-from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut
+from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut, SlotsOut, SlotOut
 from schedulr.google_calendar import build_oauth_flow, get_calendar_service, make_event_payload
 from schedulr.models import GoogleCalendarConnection
 import os
+from zoneinfo import ZoneInfo
+
 
 
 app = FastAPI(title="Schedulr AI API", version="0.0.2")
@@ -239,6 +241,88 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "connected", "business_slug": business.slug, "calendar_id": "primary"}
 
+#get available slots for a business and service on a given date
+@app.get("/b/{slug}/slots", response_model=SlotsOut)
+def get_slots(slug: str, date: str, service_id: int, db: Session = Depends(get_db)):
+    business = db.query(Business).filter(Business.slug == slug).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    service = (
+        db.query(Service)
+        .filter(Service.id == service_id, Service.business_id == business.id)
+        .first()
+    )
+    if not service:
+        raise HTTPException(status_code=404, detail="service not found for this business")
+
+    # Parse date (YYYY-MM-DD)
+    try:
+        day = datetime.fromisoformat(date).date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+    tz = ZoneInfo(business.timezone)
+
+    # Find availability windows for that weekday
+    dow = _weekday_key(datetime(day.year, day.month, day.day))
+    avails = (
+        db.query(Availability)
+        .filter(Availability.business_id == business.id, Availability.day_of_week == dow)
+        .all()
+    )
+    if not avails:
+        return {"business_slug": slug, "service_id": service_id, "date": date, "slots": []}
+
+    # Fetch existing appts for that day
+    day_start = datetime(day.year, day.month, day.day, 0, 0, tzinfo=tz)
+    day_end = day_start + timedelta(days=1)
+
+    appts = (
+        db.query(Appointment)
+        .filter(
+            Appointment.business_id == business.id,
+            Appointment.status == "booked",
+            Appointment.start_at >= day_start,
+            Appointment.start_at < day_end,
+        )
+        .all()
+    )
+
+    duration = timedelta(minutes=service.duration_min)
+    step = timedelta(minutes=business.slot_step_min)
+    buffer_td = timedelta(minutes=business.buffer_min)
+
+    slots: list[SlotOut] = []
+
+    for a in avails:
+        open_t = _parse_hhmm(a.open_time)
+        close_t = _parse_hhmm(a.close_time)
+
+        window_start = datetime(day.year, day.month, day.day, open_t.hour, open_t.minute, tzinfo=tz)
+        window_end = datetime(day.year, day.month, day.day, close_t.hour, close_t.minute, tzinfo=tz)
+
+        # last possible start time must finish within business hours
+        t = window_start
+        last_start = window_end - duration
+        while t <= last_start:
+            candidate_start = t
+            candidate_end = t + duration
+
+            # Conflict check with symmetric buffer:
+            # reject if candidate overlaps any appointment when padding both sides by buffer
+            conflict = False
+            for ap in appts:
+                if candidate_start < (ap.end_at + buffer_td) and candidate_end > (ap.start_at - buffer_td):
+                    conflict = True
+                    break
+
+            if not conflict:
+                slots.append(SlotOut(start_at=candidate_start, end_at=candidate_end))
+
+            t = t + step
+
+    return {"business_slug": slug, "service_id": service_id, "date": date, "slots": slots}
 
 
 

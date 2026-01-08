@@ -14,7 +14,8 @@ class Business(Base):
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/Los_Angeles")
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
+    buffer_min: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    slot_step_min: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
     services: Mapped[list["Service"]] = relationship(back_populates="business", cascade="all, delete-orphan")
     availability: Mapped[list["Availability"]] = relationship(back_populates="business", cascade="all, delete-orphan")
 

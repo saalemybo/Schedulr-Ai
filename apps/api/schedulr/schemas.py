@@ -59,4 +59,14 @@ class AppointmentOut(BaseModel):
     class Config:
         from_attributes = True
 
+class SlotOut(BaseModel):
+    start_at: datetime
+    end_at: datetime
+
+class SlotsOut(BaseModel):
+    business_slug: str
+    service_id: int
+    date: str
+    slots: list[SlotOut]
+
 
