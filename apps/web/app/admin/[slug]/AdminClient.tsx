@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import DatePicker from "@/components/DatePicker";
+
 
 type Appointment = {
   id: number;
@@ -13,6 +15,7 @@ type Appointment = {
   status: string;
   google_event_id?: string | null;
 };
+
 
 function isoDayRange(dateStr: string) {
   // dateStr = YYYY-MM-DD
@@ -56,23 +59,21 @@ export default function AdminClient({ slug }: { slug: string }) {
 
   return (
     <main className="min-h-screen p-8">
-      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
+            <div>
             <h1 className="text-3xl font-bold">Admin Dashboard</h1>
             <div className="text-gray-600 font-mono mt-1">{slug}</div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-sm text-gray-600">View date</div>
-            <input
-              type="date"
-              className="border rounded p-2 mt-1"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </div>
+            </div>
+            <div className="text-sm text-gray-600">Select a day below</div>
         </div>
+
+        <section className="border rounded-lg p-4">
+            <h2 className="text-xl font-semibold">Pick a day</h2>
+            <div className="mt-2">
+            <DatePicker value={date} onChange={setDate} variant="strip" days={14} />
+            </div>
+        </section>
 
         <section className="border rounded-lg p-4">
           <div className="flex items-center justify-between">

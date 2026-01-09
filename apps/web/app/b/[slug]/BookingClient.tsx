@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import DatePicker from "@/components/DatePicker";
+
 
 type Service = { id: number; business_id: number; name: string; duration_min: number; };
 type Slot = { start_at: string; end_at: string; };
@@ -93,16 +95,20 @@ export default function BookingClient({ slug }: { slug: string }) {
         </section>
 
         {selectedService && (
-          <section className="border rounded-lg p-4 shadow-sm">
-            <h2 className="text-xl font-semibold">Select Date</h2>
-            <input
-              type="date"
-              className="border rounded p-2 mt-2"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
-          </section>
-        )}
+            <section className="border rounded-lg p-4 shadow-sm">
+                <h2 className="text-xl font-semibold">Select A Date</h2>
+                <DatePicker
+                value={selectedDate}
+                onChange={(d) => {
+                    setSelectedDate(d);
+                    setSelectedSlot(null);
+                }}
+                variant="month"
+                days={14}
+                />
+            </section>
+            )}
+
 
         {selectedDate && slots.length > 0 && (
           <section className="border rounded-lg p-4 shadow-sm">
