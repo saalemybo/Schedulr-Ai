@@ -8,10 +8,18 @@ from schedulr.google_calendar import build_oauth_flow, get_calendar_service, mak
 from schedulr.models import GoogleCalendarConnection
 import os
 from zoneinfo import ZoneInfo
-
+from fastapi.middleware.cors import CORSMiddleware
+from schedulr.google_calendar import get_busy_intervals
 
 
 app = FastAPI(title="Schedulr AI API", version="0.0.2")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 #auto-create tables on startup
 Base.metadata.create_all(bind=engine)
@@ -42,6 +50,20 @@ def create_business(payload: BusinessCreate, db: Session = Depends(get_db)):
     db.add(b)
     db.commit()
     db.refresh(b)
+
+    # Default hours (MVP): Mon-Fri 09:00–17:00
+    defaults = ["mon", "tue", "wed", "thu", "fri"]
+    for dow in defaults:
+        db.add(
+            Availability(
+                business_id=b.id,
+                day_of_week=dow,
+                open_time="09:00",
+                close_time="17:00",
+            )
+        )
+    db.commit()
+
     return b
 
 
@@ -149,6 +171,19 @@ def create_appointment(payload: AppointmentCreate, db: Session = Depends(get_db)
     )
     if conflict:
         raise HTTPException(status_code=409, detail="time slot already booked")
+    
+    # 3) Google busy check (prevents booking over external events)
+    conn = (
+        db.query(GoogleCalendarConnection)
+        .filter(GoogleCalendarConnection.business_id == business.id)
+        .first()
+    )
+    if conn:
+        svc = get_calendar_service(conn.refresh_token)
+        busy = get_busy_intervals(svc, conn.calendar_id, start_at, end_at)
+        if busy:
+            raise HTTPException(status_code=409, detail="time slot conflicts with an existing calendar event")
+
 
     appt = Appointment(
         business_id=business.id,
@@ -289,9 +324,33 @@ def get_slots(slug: str, date: str, service_id: int, db: Session = Depends(get_d
         .all()
     )
 
+    # If Google connected, fetch busy blocks for that day
+    conn = (
+        db.query(GoogleCalendarConnection)
+        .filter(GoogleCalendarConnection.business_id == business.id)
+        .first()
+    )
+
+    google_busy: list[tuple[datetime, datetime]] = []
+    if conn:
+        try:
+            svc = get_calendar_service(conn.refresh_token)
+            google_busy = get_busy_intervals(svc, conn.calendar_id, day_start, day_end)
+            google_busy = [(bs.astimezone(tz), be.astimezone(tz)) for (bs, be) in google_busy]
+        except Exception as e:
+            print("google freebusy failed:", repr(e))
+            raise HTTPException(status_code=502, detail="google calendar busy check failed")
+
+
+
+
     duration = timedelta(minutes=service.duration_min)
-    step = timedelta(minutes=business.slot_step_min)
-    buffer_td = timedelta(minutes=business.buffer_min)
+
+    slot_step_min = getattr(business, "slot_step_min", None) or 15
+    buffer_min = getattr(business, "buffer_min", None) or 0
+
+    step = timedelta(minutes=slot_step_min)
+    buffer_td = timedelta(minutes=buffer_min)
 
     slots: list[SlotOut] = []
 
@@ -312,10 +371,20 @@ def get_slots(slug: str, date: str, service_id: int, db: Session = Depends(get_d
             # Conflict check with symmetric buffer:
             # reject if candidate overlaps any appointment when padding both sides by buffer
             conflict = False
+
+            # DB appointment conflicts
             for ap in appts:
                 if candidate_start < (ap.end_at + buffer_td) and candidate_end > (ap.start_at - buffer_td):
                     conflict = True
                     break
+
+            # Google Calendar busy conflicts
+            if not conflict:
+                for (bs, be) in google_busy:
+                    if candidate_start < (be + buffer_td) and candidate_end > (bs - buffer_td):
+                        conflict = True
+                        break
+
 
             if not conflict:
                 slots.append(SlotOut(start_at=candidate_start, end_at=candidate_end))
@@ -323,6 +392,37 @@ def get_slots(slug: str, date: str, service_id: int, db: Session = Depends(get_d
             t = t + step
 
     return {"business_slug": slug, "service_id": service_id, "date": date, "slots": slots}
+
+#output all appointments
+@app.get("/businesses/{slug}/appointments")
+def list_appointments(slug: str, start: str, end: str, db: Session = Depends(get_db)):
+    """
+    List appointments in [start, end) ISO datetimes for a business.
+    Example:
+      /businesses/demo-barber/appointments?start=2026-01-06T00:00:00-08:00&end=2026-01-07T00:00:00-08:00
+    """
+    business = db.query(Business).filter(Business.slug == slug).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="business not found")
+
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+    except Exception:
+        raise HTTPException(status_code=400, detail="start and end must be ISO datetimes with timezone offset")
+
+    appts = (
+        db.query(Appointment)
+        .filter(
+            Appointment.business_id == business.id,
+            Appointment.start_at >= start_dt,
+            Appointment.start_at < end_dt,
+        )
+        .order_by(Appointment.start_at.asc())
+        .all()
+    )
+    return appts
+
 
 
 
