@@ -1,11 +1,12 @@
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import datetime, time, timedelta, date as date_type
 from schedulr.db import engine, get_db
-from schedulr.models import Base, Business, Service, Availability, Appointment
-from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut, SlotsOut, SlotOut
+from schedulr.models import Base, Business, Service, Availability, Appointment, BusinessMember, User, GoogleCalendarConnection
+from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut, SlotsOut, SlotOut, MeBusinessOut
 from schedulr.google_calendar import build_oauth_flow, get_calendar_service, make_event_payload
-from schedulr.models import GoogleCalendarConnection
+from schedulr.deps import get_current_user
+from typing import List
 import os
 from zoneinfo import ZoneInfo
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,17 +40,70 @@ def _weekday_key(dt: datetime) -> str:
 def health():
     return {"status": "ok"}
 
+# Get all businesses for current user
+@app.get("/me/businesses", response_model=List[MeBusinessOut])
+def list_my_businesses(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rows = (
+        db.query(Business, BusinessMember.role)
+        .join(BusinessMember, BusinessMember.business_id == Business.id)
+        .filter(BusinessMember.user_id == user.id)
+        .order_by(Business.created_at.desc())
+        .all()
+    )
+
+    return [
+        MeBusinessOut(
+            id=b.id,
+            name=b.name,
+            slug=b.slug,
+            timezone=b.timezone,
+            created_at=b.created_at,
+            role=role,
+        )
+        for (b, role) in rows
+    ]
+
+# Dependency to require business owner role Helper Function
+def require_business_owner(business_id: int, db: Session, user: User) -> None:
+    membership = (
+        db.query(BusinessMember)
+        .filter(
+            BusinessMember.business_id == business_id,
+            BusinessMember.user_id == user.id,
+            BusinessMember.role == "OWNER",
+        )
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not an owner of this business")
+
 
 @app.post("/businesses", response_model=BusinessOut)
-def create_business(payload: BusinessCreate, db: Session = Depends(get_db)):
-    existing = db.query(Business).filter(Business.slug == payload.slug).first()
+def create_business(
+    payload: BusinessCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    slug = payload.slug.strip().lower()
+
+    existing = db.query(Business).filter(Business.slug == slug).first()
     if existing:
         raise HTTPException(status_code=409, detail="slug already exists")
 
-    b = Business(name=payload.name, slug=payload.slug, timezone=payload.timezone)
+    b = Business(
+        name=payload.name.strip(),
+        slug=slug,
+        timezone=payload.timezone,
+    )
     db.add(b)
     db.commit()
     db.refresh(b)
+
+    # ✅ link creator as OWNER
+    db.add(BusinessMember(user_id=user.id, business_id=b.id, role="OWNER"))
 
     # Default hours (MVP): Mon-Fri 09:00–17:00
     defaults = ["mon", "tue", "wed", "thu", "fri"]
@@ -62,11 +116,10 @@ def create_business(payload: BusinessCreate, db: Session = Depends(get_db)):
                 close_time="17:00",
             )
         )
+
     db.commit()
-
     return b
-
-
+#slug based business retrieval
 @app.get("/businesses/{slug}", response_model=BusinessOut)
 def get_business(slug: str, db: Session = Depends(get_db)):
     b = db.query(Business).filter(Business.slug == slug).first()
@@ -393,8 +446,8 @@ def get_slots(slug: str, date: str, service_id: int, db: Session = Depends(get_d
 
     return {"business_slug": slug, "service_id": service_id, "date": date, "slots": slots}
 
-#output all appointments
-@app.get("/businesses/{slug}/appointments")
+#output all appointments (slug based)
+@app.get("/public/businesses/{slug}/appointments")
 def list_appointments(slug: str, start: str, end: str, db: Session = Depends(get_db)):
     """
     List appointments in [start, end) ISO datetimes for a business.
@@ -423,6 +476,38 @@ def list_appointments(slug: str, start: str, end: str, db: Session = Depends(get
     )
     return appts
 
+#id based appointment retrieval
+@app.get("/businesses/{business_id}/appointments", response_model=list[AppointmentOut])
+def list_appts_for_business(
+    business_id: int,
+    start: datetime = Query(...),
+    end: datetime = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # owner check
+    m = (
+        db.query(BusinessMember)
+        .filter(
+            BusinessMember.business_id == business_id,
+            BusinessMember.user_id == user.id,
+            BusinessMember.role == "OWNER",
+        )
+        .first()
+    )
+    if not m:
+        raise HTTPException(status_code=403, detail="not owner")
+
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.business_id == business_id,
+            Appointment.start_at >= start,
+            Appointment.start_at < end,
+        )
+        .order_by(Appointment.start_at.asc())
+        .all()
+    )
 
 
 

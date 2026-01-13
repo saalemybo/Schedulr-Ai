@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import DatePicker from "@/components/DatePicker";
 
-
 type Appointment = {
   id: number;
   business_id: number;
@@ -13,14 +12,9 @@ type Appointment = {
   start_at: string;
   end_at: string;
   status: string;
-  google_event_id?: string | null;
 };
 
-
 function isoDayRange(dateStr: string) {
-  // dateStr = YYYY-MM-DD
-  // For MVP: assume America/Los_Angeles offset -08:00 (good enough for demo).
-  // Later we’ll fetch business timezone and do this properly.
   const start = `${dateStr}T00:00:00-08:00`;
   const endDate = new Date(`${dateStr}T00:00:00-08:00`);
   endDate.setDate(endDate.getDate() + 1);
@@ -31,15 +25,15 @@ function isoDayRange(dateStr: string) {
   return { start, end };
 }
 
-export default function AdminClient({ slug }: { slug: string }) {
+export default function DashboardClient({businessId
+}: {
+  businessId: string;
+}) {
   const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
   const [date, setDate] = useState(() => {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    return now.toISOString().slice(0, 10);
   });
 
   const [appts, setAppts] = useState<Appointment[]>([]);
@@ -47,49 +41,31 @@ export default function AdminClient({ slug }: { slug: string }) {
 
   const { start, end } = useMemo(() => isoDayRange(date), [date]);
 
-useEffect(() => {
-  let cancelled = false;
-  const controller = new AbortController();
+  useEffect(() => {
+    if(!businessId) return;
+    
+    const email =
+      localStorage.getItem("dev_email") ?? "test@example.com";
 
-  async function load() {
-    try {
-      setLoading(true);
+    setLoading(true);
 
-      const url = `${base}/public/businesses/${slug}/appointments?start=${encodeURIComponent(
+    fetch(
+      `${base}/businesses/${businessId}/appointments?start=${encodeURIComponent(
         start
-      )}&end=${encodeURIComponent(end)}`;
-
-      const res = await fetch(url, {
+      )}&end=${encodeURIComponent(end)}`,
+      {
+        headers: { "X-User-Email": email },
         cache: "no-store",
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Fetch failed (${res.status}) ${text}`);
       }
-
-      const data = await res.json();
-      if (!cancelled) setAppts(data);
-    } catch (err) {
-      // AbortError is expected when switching slugs/dates quickly
-      if ((err as any)?.name !== "AbortError") {
-        console.error("Failed to load public appointments:", err);
-      }
-      if (!cancelled) setAppts([]); // keep UI stable on error
-    } finally {
-      if (!cancelled) setLoading(false);
-    }
-  }
-
-  load();
-
-  return () => {
-    cancelled = true;
-    controller.abort();
-  };
-}, [base, slug, start, end]);
-
+    )
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      })
+      .then(setAppts)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [base, businessId, start, end]);
 
   return (
     <main className="min-h-screen p-8">
@@ -97,7 +73,7 @@ useEffect(() => {
         <div className="flex items-start justify-between gap-4">
             <div>
             <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-            <div className="text-gray-600 font-mono mt-1">{slug}</div>
+            <div className="text-gray-600 font-mono mt-1">{businessId}</div>
             </div>
             <div className="text-sm text-gray-600">Select a day below</div>
         </div>

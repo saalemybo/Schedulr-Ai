@@ -16,6 +16,9 @@ class BusinessOut(BaseModel):
     class Config:
         from_attributes = True
 
+class MeBusinessOut(BusinessOut):
+    role: str
+
 class ServiceCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     duration_min: int = Field(ge=5, le=480)

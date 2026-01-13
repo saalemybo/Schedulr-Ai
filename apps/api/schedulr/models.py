@@ -1,4 +1,4 @@
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -18,6 +18,31 @@ class Business(Base):
     slot_step_min: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
     services: Mapped[list["Service"]] = relationship(back_populates="business", cascade="all, delete-orphan")
     availability: Mapped[list["Availability"]] = relationship(back_populates="business", cascade="all, delete-orphan")
+    members: Mapped[list["BusinessMember"]] = relationship(back_populates="business", cascade="all, delete-orphan")
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    memberships: Mapped[list["BusinessMember"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+class BusinessMember(Base):
+    __tablename__ = "business_members"
+    __table_args__ = (
+        UniqueConstraint("user_id", "business_id", name="uq_user_business"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="OWNER")
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="memberships")
+    business: Mapped["Business"] = relationship(back_populates="members")
 
 #service table storing services offered by businesses
 class Service(Base):
