@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, time, timedelta, date as date_type
 from schedulr.db import engine, get_db
 from schedulr.models import Base, Business, Service, Availability, Appointment, BusinessMember, User, GoogleCalendarConnection
-from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut, SlotsOut, SlotOut, MeBusinessOut
+from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut, SlotsOut, SlotOut, MeBusinessOut, ServiceUpdate, AvailabilityUpsert, AvailabilityOut
 from schedulr.google_calendar import build_oauth_flow, get_calendar_service, make_event_payload
 from schedulr.deps import get_current_user
 from typing import List
@@ -120,14 +120,14 @@ def create_business(
     db.commit()
     return b
 #slug based business retrieval
-@app.get("/businesses/{slug}", response_model=BusinessOut)
+@app.get("/public/businesses/{slug}", response_model=BusinessOut)
 def get_business(slug: str, db: Session = Depends(get_db)):
     b = db.query(Business).filter(Business.slug == slug).first()
     if not b:
         raise HTTPException(status_code=404, detail="business not found")
     return b
 
-@app.post("/businesses/{slug}/services", response_model=ServiceOut)
+@app.post("/public/businesses/{slug}/services", response_model=ServiceOut)
 def create_service(slug: str, payload: ServiceCreate, db: Session = Depends(get_db)):
     business = db.query(Business).filter(Business.slug == slug).first()
     if not business:
@@ -140,7 +140,7 @@ def create_service(slug: str, payload: ServiceCreate, db: Session = Depends(get_
     return svc
 
 
-@app.get("/businesses/{slug}/services", response_model=list[ServiceOut])
+@app.get("/public/businesses/{slug}/services", response_model=list[ServiceOut])
 def list_services(slug: str, db: Session = Depends(get_db)):
     business = db.query(Business).filter(Business.slug == slug).first()
     if not business:
@@ -272,32 +272,28 @@ def create_appointment(payload: AppointmentCreate, db: Session = Depends(get_db)
 
     return appt
 
-@app.get("/integrations/google/start")
-def google_start(business_slug: str, db: Session = Depends(get_db)):
-    # Make sure business exists
-    business = db.query(Business).filter(Business.slug == business_slug).first()
-    if not business:
-        raise HTTPException(status_code=404, detail="business not found")
+@app.get("/businesses/{business_id}/integrations/google/start")
+def google_start(business_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    require_business_owner(business_id, db, user)
 
     flow = build_oauth_flow()
-
-    # IMPORTANT: set state to the business slug so callback can find it
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
-        state=business_slug,
+        state=str(business_id),  # ✅ state = business_id
     )
-
     return {"auth_url": auth_url}
+
 
 
 @app.get("/integrations/google/callback")
 def google_callback(code: str, state: str, db: Session = Depends(get_db)):
-    # Google returns `state` -> we use it as the business slug
-    business = db.query(Business).filter(Business.slug == state).first()
+
+    business_id = int(state)
+    business = db.query(Business).filter(Business.id == business_id).first()
     if not business:
-        raise HTTPException(status_code=404, detail="business not found")
+        raise HTTPException(404, "business not found")
 
     flow = build_oauth_flow()
     flow.fetch_token(code=code)
@@ -506,6 +502,143 @@ def list_appts_for_business(
             Appointment.start_at < end,
         )
         .order_by(Appointment.start_at.asc())
+        .all()
+    )
+
+
+#id based service update
+@app.get("/businesses/{business_id}/services", response_model=List[ServiceOut])
+def list_services(
+    business_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_business_owner(business_id, db, user)
+
+    return (
+        db.query(Service)
+        .filter(Service.business_id == business_id)
+        .order_by(Service.id.asc())
+        .all()
+    )
+
+
+@app.post("/businesses/{business_id}/services", response_model=ServiceOut)
+def create_service(
+    business_id: int,
+    payload: ServiceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_business_owner(business_id, db, user)
+
+    s = Service(
+        business_id=business_id,
+        name=payload.name.strip(),
+        duration_min=payload.duration_min,
+    )
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+@app.patch("/services/{service_id}", response_model=ServiceOut)
+def update_service(
+    service_id: int,
+    payload: ServiceUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    s = db.query(Service).filter(Service.id == service_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="service not found")
+
+    require_business_owner(s.business_id, db, user)
+
+    if payload.name is not None:
+        s.name = payload.name.strip()
+    if payload.duration_min is not None:
+        s.duration_min = payload.duration_min
+
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+@app.delete("/services/{service_id}")
+def delete_service(
+    service_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    s = db.query(Service).filter(Service.id == service_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="service not found")
+
+    require_business_owner(s.business_id, db, user)
+
+    db.delete(s)
+    db.commit()
+    return {"status": "deleted"}
+
+#id based and owner only availability
+VALID_DOW = {"mon","tue","wed","thu","fri","sat","sun"}
+
+def _hhmm_to_minutes(hhmm: str) -> int:
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+@app.get("/businesses/{business_id}/availability", response_model=List[AvailabilityOut])
+def get_availability(
+    business_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_business_owner(business_id, db, user)
+
+    return (
+        db.query(Availability)
+        .filter(Availability.business_id == business_id)
+        .order_by(Availability.id.asc())
+        .all()
+    )
+
+
+@app.put("/businesses/{business_id}/availability", response_model=List[AvailabilityOut])
+def replace_availability(
+    business_id: int,
+    windows: List[AvailabilityUpsert],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_business_owner(business_id, db, user)
+
+    # Validate windows
+    for w in windows:
+        if w.day_of_week not in VALID_DOW:
+            raise HTTPException(400, detail=f"invalid day_of_week: {w.day_of_week}")
+        if _hhmm_to_minutes(w.close_time) <= _hhmm_to_minutes(w.open_time):
+            raise HTTPException(400, detail=f"close_time must be after open_time for {w.day_of_week}")
+
+    # Replace all existing
+    db.query(Availability).filter(Availability.business_id == business_id).delete()
+
+    for w in windows:
+        db.add(
+            Availability(
+                business_id=business_id,
+                day_of_week=w.day_of_week,
+                open_time=w.open_time,
+                close_time=w.close_time,
+            )
+        )
+
+    db.commit()
+
+    return (
+        db.query(Availability)
+        .filter(Availability.business_id == business_id)
         .all()
     )
 

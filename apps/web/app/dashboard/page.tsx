@@ -14,6 +14,17 @@ type MeBusiness = {
   role: string;
 };
 
+async function readJsonOrThrow(res: Response) {
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!res.ok) {
+    const msg = data?.detail || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
 export default function OwnerHome() {
   const [items, setItems] = useState<MeBusiness[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -23,7 +34,7 @@ export default function OwnerHome() {
     (async () => {
       try {
         const res = await apiFetch("/me/businesses");
-        const data = (await res.json()) as MeBusiness[];
+        const data = (await readJsonOrThrow(res)) as MeBusiness[];
         setItems(data);
       } catch (e: any) {
         setErr(e?.message ?? "Failed to load businesses");
@@ -36,11 +47,12 @@ export default function OwnerHome() {
     window.location.reload();
   }
 
-  // when only one business, go straight to that business dashboard else list all businesses
+  // need to fix so no loops happen
+  /* when only one business, go straight to that business dashboard else list all businesses
   const router = useRouter();
   useEffect(() => {
     if (items.length === 1) router.push(`/dashboard/${items[0].id}`);
-  }, [items]);
+  }, [items]); */
 
 
   return (

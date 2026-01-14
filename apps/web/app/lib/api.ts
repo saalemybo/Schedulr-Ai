@@ -3,7 +3,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 // dev-only helper: store email in localStorage
 export function getDevEmail() {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("dev_email") || "test@example.com";
+  return window.localStorage.getItem("dev_email");
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}) {
@@ -25,3 +25,4 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   }
   return res;
 }
+

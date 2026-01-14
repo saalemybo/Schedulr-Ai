@@ -19,7 +19,7 @@ export default function BookingClient({ slug }: { slug: string }) {
   const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
   useEffect(() => {
-    fetch(`${base}/businesses/${slug}/services`, { cache: "no-store" })
+    fetch(`${base}/public/businesses/${slug}/services`, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : []))
       .then(setServices)
       .catch(() => setServices([]));

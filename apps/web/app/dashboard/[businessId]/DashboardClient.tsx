@@ -67,6 +67,112 @@ export default function DashboardClient({businessId
       .finally(() => setLoading(false));
   }, [base, businessId, start, end]);
 
+  // service and appointments
+  type Service = { id: number; business_id: number; name: string; duration_min: number };
+  type Availability = { id: number; business_id: number; day_of_week: string; open_time: string; close_time: string };
+
+  const DOWS = ["mon","tue","wed","thu","fri","sat","sun"] as const;
+  const DOW_LABEL: Record<string,string> = { mon:"Mon", tue:"Tue", wed:"Wed", thu:"Thu", fri:"Fri", sat:"Sat", sun:"Sun" };
+
+  function getRow(dow: string) {
+    return hours.find((h) => h.day_of_week === dow) ?? { id: 0, business_id: Number(businessId), day_of_week: dow, open_time: "09:00", close_time: "17:00" };
+  }
+
+
+  const [services, setServices] = useState<Service[]>([]);
+  const [hours, setHours] = useState<Availability[]>([]);
+  const [savingServices, setSavingServices] = useState(false);
+  const [savingHours, setSavingHours] = useState(false);
+  const devEmail = () => localStorage.getItem("dev_email") ?? "test@example.com";
+
+  useEffect(() => {
+  if (!businessId) return;
+  const email = devEmail();
+
+  fetch(`${base}/businesses/${businessId}/services`, {
+    headers: { "X-User-Email": email },
+    cache: "no-store",
+  })
+    .then(async (r) => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
+    .then(setServices)
+    .catch(console.error);
+
+  fetch(`${base}/businesses/${businessId}/availability`, {
+    headers: { "X-User-Email": email },
+    cache: "no-store",
+  })
+    .then(async (r) => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
+    .then(setHours)
+    .catch(console.error);
+}, [base, businessId]);
+
+async function addService() {
+  const email = devEmail();
+  setSavingServices(true);
+  try {
+    const res = await fetch(`${base}/businesses/${businessId}/services`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Email": email },
+      body: JSON.stringify({ name: "New Service", duration_min: 30 }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const created = await res.json();
+    setServices((prev) => [...prev, created]);
+  } finally {
+    setSavingServices(false);
+  }
+}
+
+async function saveServicePatch(serviceId: number, patch: Partial<{ name: string; duration_min: number }>) {
+  const email = devEmail();
+  const res = await fetch(`${base}/services/${serviceId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-User-Email": email },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const updated = await res.json();
+  setServices((prev) => prev.map((s) => (s.id === serviceId ? updated : s)));
+}
+
+async function deleteService(serviceId: number) {
+  const email = devEmail();
+  const res = await fetch(`${base}/services/${serviceId}`, {
+    method: "DELETE",
+    headers: { "X-User-Email": email },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  setServices((prev) => prev.filter((s) => s.id !== serviceId));
+}
+
+function normalizeHoursForPut(rows: Availability[]) {
+  // your PUT endpoint expects List[AvailabilityUpsert]
+  // which is: { day_of_week, open_time, close_time }
+  // It replaces all windows.
+  return rows.map((r) => ({
+    day_of_week: r.day_of_week,
+    open_time: r.open_time,
+    close_time: r.close_time,
+  }));
+}
+
+async function saveHours() {
+  const email = devEmail();
+  setSavingHours(true);
+  try {
+    const res = await fetch(`${base}/businesses/${businessId}/availability`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-User-Email": email },
+      body: JSON.stringify(normalizeHoursForPut(hours)),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const updated = await res.json();
+    setHours(updated);
+  } finally {
+    setSavingHours(false);
+  }
+}
+
   return (
     <main className="min-h-screen p-8">
         <div className="mx-auto max-w-4xl space-y-6">
@@ -114,6 +220,137 @@ export default function DashboardClient({businessId
             </ul>
           )}
         </section>
+
+        
+
+        <section className="border rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Services</h2>
+            <button
+              onClick={addService}
+              className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              disabled={savingServices}
+            >
+              + Add service
+            </button>
+          </div>
+
+          {services.length === 0 ? (
+            <p className="mt-3 text-gray-500">No services yet.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {services.map((s) => (
+                <li key={s.id} className="rounded border p-3">
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-center">
+                    <div className="md:col-span-6">
+                      <label className="text-xs text-gray-500">Name</label>
+                      <input
+                        className="mt-1 w-full rounded border px-2 py-1"
+                        value={s.name}
+                        onChange={(e) =>
+                          setServices((prev) =>
+                            prev.map((x) => (x.id === s.id ? { ...x, name: e.target.value } : x))
+                          )
+                        }
+                        onBlur={() => saveServicePatch(s.id, { name: s.name }).catch(console.error)}
+                      />
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <label className="text-xs text-gray-500">Duration (min)</label>
+                      <input
+                        type="number"
+                        min={5}
+                        max={480}
+                        className="mt-1 w-full rounded border px-2 py-1"
+                        value={s.duration_min}
+                        onChange={(e) =>
+                          setServices((prev) =>
+                            prev.map((x) =>
+                              x.id === s.id ? { ...x, duration_min: Number(e.target.value) } : x
+                            )
+                          )
+                        }
+                        onBlur={() => saveServicePatch(s.id, { duration_min: s.duration_min }).catch(console.error)}
+                      />
+                    </div>
+
+                    <div className="md:col-span-3 md:text-right">
+                      <button
+                        onClick={() => deleteService(s.id).catch(console.error)}
+                        className="mt-4 md:mt-0 rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="border rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Hours</h2>
+            <button
+              onClick={() => saveHours().catch(console.error)}
+              className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              disabled={savingHours}
+            >
+              {savingHours ? "Saving..." : "Save hours"}
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {DOWS.map((dow) => {
+              const row = getRow(dow);
+              return (
+                <div key={dow} className="grid grid-cols-12 items-center gap-2">
+                  <div className="col-span-2 text-sm font-medium">{DOW_LABEL[dow]}</div>
+
+                  <div className="col-span-5">
+                    <input
+                      type="time"
+                      className="w-full rounded border px-2 py-1"
+                      value={row.open_time}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setHours((prev) => {
+                          const has = prev.some((x) => x.day_of_week === dow);
+                          if (!has) return [...prev, { ...row, open_time: v }];
+                          return prev.map((x) => (x.day_of_week === dow ? { ...x, open_time: v } : x));
+                        });
+                      }}
+                    />
+                  </div>
+
+                  <div className="col-span-5">
+                    <input
+                      type="time"
+                      className="w-full rounded border px-2 py-1"
+                      value={row.close_time}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setHours((prev) => {
+                          const has = prev.some((x) => x.day_of_week === dow);
+                          if (!has) return [...prev, { ...row, close_time: v }];
+                          return prev.map((x) => (x.day_of_week === dow ? { ...x, close_time: v } : x));
+                        });
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 text-sm text-gray-600">
+            Tip: For closed days, set open/close equal or just remove that day later (we can add a “Closed” toggle next).
+          </div>
+        </section>
+
+
 
         <section className="border rounded-lg p-4">
           <h2 className="text-xl font-semibold">Metrics</h2>

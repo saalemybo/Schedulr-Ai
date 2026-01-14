@@ -39,6 +39,24 @@ class AvailabilityCreate(BaseModel):
     open_time: str = Field(pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$")
     close_time: str = Field(pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
+class ServiceUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    duration_min: int | None = Field(default=None, ge=5, le=600)
+
+class AvailabilityUpsert(BaseModel):
+    day_of_week: str = Field(pattern="^(mon|tue|wed|thu|fri|sat|sun)$")
+    open_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    close_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+class AvailabilityOut(BaseModel):
+    id: int
+    business_id: int
+    day_of_week: str = Field(pattern="^(mon|tue|wed|thu|fri|sat|sun)$")
+    open_time: str = Field(pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    close_time: str = Field(pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+    class Config:
+        from_attributes = True
 
 class AppointmentCreate(BaseModel):
     business_slug: str
