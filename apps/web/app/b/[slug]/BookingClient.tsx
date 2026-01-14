@@ -57,12 +57,34 @@ export default function BookingClient({ slug }: { slug: string }) {
     const data = await res.json();
     alert(`Appointment booked! ID: ${data.id}`);
   }
+  type Business = {
+  id: number;
+  name: string;
+  slug: string;
+  timezone: string;};
+
+const [business, setBusiness] = useState<Business | null>(null);
+
+useEffect(() => {
+  if (!slug) return;
+
+  fetch(`${base}/public/businesses/${slug}`, {
+    cache: "no-store",
+  })
+    .then(async (res) => {
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      return JSON.parse(text);
+    })
+    .then(setBusiness)
+    .catch(console.error);
+}, [base, slug]);
 
   return (
     <main className="min-h-screen p-8">
       <div className="mx-auto max-w-2xl space-y-6">
-        <h1 className="text-3xl font-bold">Book an Appointment</h1>
-        <p className="text-gray-600 font-mono">Business: {slug}</p>
+        <h1 className="text-3xl font-bold">{business?.name}</h1>
+        <p className="text-gray-600 font-mono">Book An Appointment: </p>
 
         <section className="border rounded-lg p-4 shadow-sm">
           <h2 className="text-xl font-semibold">Select Service</h2>
@@ -87,7 +109,6 @@ export default function BookingClient({ slug }: { slug: string }) {
                     <div className="font-medium">{s.name}</div>
                     <div className="text-sm text-gray-600">{s.duration_min} min</div>
                   </div>
-                  <span className="text-sm text-gray-400">id: {s.id}</span>
                 </li>
               ))}
             </ul>

@@ -139,6 +139,20 @@ def create_service(slug: str, payload: ServiceCreate, db: Session = Depends(get_
     db.refresh(svc)
     return svc
 
+#return business slug from id
+@app.get("/businesses/{business_id:int}", response_model=BusinessOut)
+def get_business_by_id(
+    business_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_business_owner(business_id, db, user)
+    b = db.query(Business).filter(Business.id == business_id).first()
+    if not b:
+        raise HTTPException(404, "business not found")
+    return b
+
+
 
 @app.get("/public/businesses/{slug}/services", response_model=list[ServiceOut])
 def list_services(slug: str, db: Session = Depends(get_db)):

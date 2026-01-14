@@ -31,7 +31,7 @@ export default function NewBusiness() {
         body: JSON.stringify({ name, slug, timezone }),
       });
       const b = await res.json();
-      router.push(`/dashboard/${b.id}/services`);
+      router.push(`/dashboard/${b.id}`);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to create business");
       setLoading(false);
