@@ -226,6 +226,40 @@ function copyBookingLink() {
   });
 }
 
+const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
+
+useEffect(() => {
+  if (!businessId) return;
+  const email = devEmail();
+
+  fetch(`${base}/businesses/${businessId}/integrations/google/status`, {
+    headers: { "X-User-Email": email },
+    cache: "no-store",
+  })
+    .then(async (r) => {
+      const text = await r.text();
+      if (!r.ok) throw new Error(text);
+      return JSON.parse(text);
+    })
+    .then((data) => {
+      setGoogleConnected(data.connected);
+      setGoogleCalendarId(data.calendar_id ?? null);
+    })
+    .catch(console.error);
+}, [base, businessId]);
+
+async function connectGoogle() {
+  const email = devEmail();
+  const res = await fetch(`${base}/businesses/${businessId}/integrations/google/start`, {
+    headers: { "X-User-Email": email },
+    cache: "no-store",
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text);
+  const data = JSON.parse(text);
+  window.location.href = data.auth_url; // redirect to Google OAuth
+}
 
 
   return (
@@ -248,6 +282,66 @@ function copyBookingLink() {
           </button>
         )}
       </div>
+
+      <section className="border rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Google Calendar</h2>
+
+          {googleConnected ? (
+            <span className="text-sm text-green-700">Connected</span>
+          ) : (
+            <button
+              onClick={() => connectGoogle().catch(console.error)}
+              className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              Connect Google Calendar
+            </button>
+          )}
+        </div>
+
+        <div className="mt-2 text-sm text-gray-600">
+          {googleConnected
+            ? `Bookings will be written to your Google Calendar (${googleCalendarId ?? "primary"}).`
+            : "Connect to prevent double-booking and automatically add bookings to your calendar."}
+        </div>
+      </section>
+
+      <section className="border rounded-lg p-4">
+        <h2 className="text-xl font-semibold">Pick a day</h2>
+        <div className="mt-2">
+          <DatePicker value={date} onChange={setDate} variant="strip" days={14} />
+        </div>
+      </section>
+
+      <section className="border rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Appointments</h2>
+          <div className="text-sm text-gray-600">
+            {loading ? "Loading..." : `${appts.length} booking(s)`}
+          </div>
+        </div>
+
+        {appts.length === 0 && !loading ? (
+          <p className="mt-3 text-gray-500">No appointments for this day.</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {appts.map((a) => (
+              <li key={a.id} className="rounded border p-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-medium">{a.customer_name}</div>
+                    <div className="text-sm text-gray-600">{a.customer_email}</div>
+                  </div>
+                  <div className="text-sm font-mono text-right">
+                    <div>{a.start_at}</div>
+                    <div className="text-gray-600">{a.status}</div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
 
       <section className="border rounded-lg p-4">

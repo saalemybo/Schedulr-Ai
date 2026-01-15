@@ -656,5 +656,25 @@ def replace_availability(
         .all()
     )
 
+#google calendar status check
+@app.get("/businesses/{business_id:int}/integrations/google/status")
+def google_status(
+    business_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_business_owner(business_id, db, user)
+
+    conn = (
+        db.query(GoogleCalendarConnection)
+        .filter(GoogleCalendarConnection.business_id == business_id)
+        .first()
+    )
+
+    return {
+        "connected": bool(conn),
+        "calendar_id": conn.calendar_id if conn else None,
+    }
+
 
 
