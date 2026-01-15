@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import DatePicker from "@/components/DatePicker";
+import { useRouter } from "next/navigation";
 
 
 type Service = { id: number; business_id: number; name: string; duration_min: number; };
@@ -15,6 +16,10 @@ export default function BookingClient({ slug }: { slug: string }) {
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const router = useRouter();
+  const [booking, setBooking] = useState(false);
+  const [bookErr, setBookErr] = useState<string | null>(null);
+ 
 
   const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -33,30 +38,54 @@ export default function BookingClient({ slug }: { slug: string }) {
       .catch(() => setSlots([]));
   }, [base, slug, selectedService, selectedDate]);
 
-  async function bookAppointment() {
-    if (!selectedService || !selectedSlot) return;
+async function bookAppointment() {
+  if (!selectedService || !selectedSlot) return;
+  if (!name.trim() || !email.trim()) {
+    setBookErr("Please enter your name and email.");
+    return;
+  }
 
+  setBooking(true);
+  setBookErr(null);
+
+  try {
     const res = await fetch(`${base}/appointments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         business_slug: slug,
         service_id: selectedService,
-        customer_name: name,
-        customer_email: email,
+        customer_name: name.trim(),
+        customer_email: email.trim(),
         start_at: selectedSlot.start_at,
       }),
     });
 
+    const text = await res.text();
+
     if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      alert(`Booking failed: ${txt}`);
+      // backend returns JSON like {"detail":"..."} sometimes; fall back to raw text
+      let msg = text;
+      try {
+        const j = JSON.parse(text);
+        msg = j?.detail ?? msg;
+      } catch {}
+      setBookErr(msg || "Booking failed.");
       return;
     }
 
-    const data = await res.json();
-    alert(`Appointment booked! ID: ${data.id}`);
+    const data = text ? JSON.parse(text) : null;
+    const apptId = data?.id;
+
+    // Redirect to confirmation page
+    router.push(`/b/${slug}/confirmed?appt=${encodeURIComponent(String(apptId ?? ""))}`);
+  } catch (e: any) {
+    setBookErr(e?.message ?? "Booking failed.");
+  } finally {
+    setBooking(false);
   }
+}
+
   type Business = {
   id: number;
   name: string;
@@ -155,8 +184,14 @@ useEffect(() => {
             <h2 className="text-xl font-semibold">Your Info</h2>
             <input className="border rounded p-2 w-full" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} />
             <input className="border rounded p-2 w-full" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <button onClick={bookAppointment} className="bg-black text-white px-4 py-2 rounded-lg hover:opacity-80">
-              Confirm Booking
+            {bookErr && <p className="text-sm text-red-600">{bookErr}</p>}
+
+            <button
+            onClick={bookAppointment}
+            disabled={booking}
+            className="bg-black text-white px-4 py-2 rounded-lg hover:opacity-80 disabled:opacity-50"
+            >
+            {booking ? "Booking..." : "Confirm Booking"}
             </button>
           </section>
         )}
