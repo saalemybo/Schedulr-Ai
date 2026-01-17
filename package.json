@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "workspaces": ["apps/*"],
+  "dependencies": {
+    "next-auth": "^4.24.13"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9"
+  }
+}

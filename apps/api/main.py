@@ -4,19 +4,22 @@ from datetime import datetime, time, timedelta, date as date_type
 from schedulr.db import engine, get_db
 from schedulr.models import Base, Business, Service, Availability, Appointment, BusinessMember, User, GoogleCalendarConnection
 from schedulr.schemas import BusinessCreate, BusinessOut, ServiceCreate, ServiceOut, AvailabilityCreate, AppointmentCreate, AppointmentOut, SlotsOut, SlotOut, MeBusinessOut, ServiceUpdate, AvailabilityUpsert, AvailabilityOut
-from schedulr.google_calendar import build_oauth_flow, get_calendar_service, make_event_payload
+from schedulr.google_calendar import build_oauth_flow, get_calendar_service, make_event_payload, SCOPES
 from schedulr.deps import get_current_user
 from typing import List
 import os
 from zoneinfo import ZoneInfo
 from fastapi.middleware.cors import CORSMiddleware
 from schedulr.google_calendar import get_busy_intervals
+from fastapi.responses import RedirectResponse
+from urllib.parse import urlencode
+
 
 
 app = FastAPI(title="Schedulr AI API", version="0.0.2")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -286,39 +289,57 @@ def create_appointment(payload: AppointmentCreate, db: Session = Depends(get_db)
 
     return appt
 
+
 @app.get("/businesses/{business_id}/integrations/google/start")
 def google_start(business_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     require_business_owner(business_id, db, user)
 
-    flow = build_oauth_flow()
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-        state=str(business_id),  # ✅ state = business_id
-    )
-    return {"auth_url": auth_url}
+    try:
+        flow = build_oauth_flow()
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="false",
+            prompt="consent",
+            state=str(business_id),
+        )
+        return {"auth_url": auth_url}
+    except Exception as e:
+        # temporary debugging
+        raise HTTPException(status_code=500, detail=f"google_start failed: {type(e).__name__}: {e}")
 
 
+
+FRONTEND_BASE = os.environ.get("FRONTEND_BASE", "http://localhost:3000")
 
 @app.get("/integrations/google/callback")
 def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+    # 1) Validate state
+    try:
+        business_id = int(state)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid oauth state")
 
-    business_id = int(state)
     business = db.query(Business).filter(Business.id == business_id).first()
     if not business:
-        raise HTTPException(404, "business not found")
+        raise HTTPException(status_code=404, detail="business not found")
 
+    # 2) Exchange code for tokens (catch errors so you don't get 500)
     flow = build_oauth_flow()
-    flow.fetch_token(code=code)
+    try:
+        flow.fetch_token(code=code)
+    except Exception as e:
+        msg = str(e).replace("\n", " ")[:200]
+        params = urlencode({"google": "error", "reason": "token_exchange_failed", "msg": msg})
+        return RedirectResponse(f"{FRONTEND_BASE}/dashboard/{business_id}?{params}", status_code=302)
 
     creds = flow.credentials
-    if not creds.refresh_token:
-        raise HTTPException(
-            status_code=400,
-            detail="no refresh_token returned; revoke app access in Google and reconnect",
-        )
 
+    # 3) Need refresh token for offline access
+    if not creds.refresh_token:
+        params = urlencode({"google": "error", "reason": "no_refresh_token"})
+        return RedirectResponse(f"{FRONTEND_BASE}/dashboard/{business_id}?{params}", status_code=302)
+
+    # 4) Upsert connection
     existing = (
         db.query(GoogleCalendarConnection)
         .filter(GoogleCalendarConnection.business_id == business.id)
@@ -337,7 +358,10 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
         )
 
     db.commit()
-    return {"status": "connected", "business_slug": business.slug, "calendar_id": "primary"}
+
+    # 5) Redirect back to the business page (success)
+    params = urlencode({"google": "connected"})
+    return RedirectResponse(f"{FRONTEND_BASE}/dashboard/{business_id}?{params}", status_code=302)
 
 #get available slots for a business and service on a given date
 @app.get("/b/{slug}/slots", response_model=SlotsOut)
@@ -657,7 +681,7 @@ def replace_availability(
     )
 
 #google calendar status check
-@app.get("/businesses/{business_id:int}/integrations/google/status")
+@app.get("/businesses/{business_id}/integrations/google/status")
 def google_status(
     business_id: int,
     db: Session = Depends(get_db),

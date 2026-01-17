@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import DatePicker from "@/components/DatePicker";
+import { signOut, useSession } from "next-auth/react";
+import { apiFetch } from "../../lib/api";
 
 type Appointment = {
   id: number;
@@ -25,243 +27,176 @@ function isoDayRange(dateStr: string) {
   return { start, end };
 }
 
-export default function DashboardClient({businessId
-}: {
-  businessId: string;
-}) {
-  const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+type Service = { id: number; business_id: number; name: string; duration_min: number };
+type AvailabilityApi = { id: number; business_id: number; day_of_week: string; open_time: string; close_time: string };
 
-  const [date, setDate] = useState(() => {
-    const now = new Date();
-    return now.toISOString().slice(0, 10);
-  });
+const DOWS = ["mon","tue","wed","thu","fri","sat","sun"] as const;
+const DOW_LABEL: Record<string,string> = { mon:"Mon", tue:"Tue", wed:"Wed", thu:"Thu", fri:"Fri", sat:"Sat", sun:"Sun" };
 
-  const [appts, setAppts] = useState<Appointment[]>([]);
-  const [loading, setLoading] = useState(false);
+type HoursRow = {
+  day_of_week: (typeof DOWS)[number];
+  open_time: string;
+  close_time: string;
+  enabled: boolean;
+};
 
-  const { start, end } = useMemo(() => isoDayRange(date), [date]);
-
-  useEffect(() => {
-    if(!businessId) return;
-    
-    const email =
-      localStorage.getItem("dev_email") ?? "test@example.com";
-
-    setLoading(true);
-
-    fetch(
-      `${base}/businesses/${businessId}/appointments?start=${encodeURIComponent(
-        start
-      )}&end=${encodeURIComponent(end)}`,
-      {
-        headers: { "X-User-Email": email },
-        cache: "no-store",
-      }
-    )
-      .then(async (res) => {
-        if (!res.ok) throw new Error(await res.text());
-        return res.json();
-      })
-      .then(setAppts)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [base, businessId, start, end]);
-
-  // service and appointments
-  type Service = { id: number; business_id: number; name: string; duration_min: number };
-  type Availability = { id: number; business_id: number; day_of_week: string; open_time: string; close_time: string };
-
-  type AvailabilityApi = { id: number; business_id: number; day_of_week: string; open_time: string; close_time: string };
-
-  type HoursRow = {
-    day_of_week: (typeof DOWS)[number];
-    open_time: string;
-    close_time: string;
-    enabled: boolean;
-  };
-
-
-  const DOWS = ["mon","tue","wed","thu","fri","sat","sun"] as const;
-  const DOW_LABEL: Record<string,string> = { mon:"Mon", tue:"Tue", wed:"Wed", thu:"Thu", fri:"Fri", sat:"Sat", sun:"Sun" };
-
-
-  const [services, setServices] = useState<Service[]>([]);
-  const [hours, setHours] = useState<HoursRow[]>([]);
-  const [savingServices, setSavingServices] = useState(false);
-  const [savingHours, setSavingHours] = useState(false);
-  const devEmail = () => localStorage.getItem("dev_email") ?? "test@example.com";
-
-  function normalizeAvailability(rows: AvailabilityApi[]): HoursRow[] {
+function normalizeAvailability(rows: AvailabilityApi[]): HoursRow[] {
   const map = new Map(rows.map((r) => [r.day_of_week, r]));
   return DOWS.map((dow) => {
     const r = map.get(dow);
     if (r) {
       return { day_of_week: dow, open_time: r.open_time, close_time: r.close_time, enabled: true };
     }
-    // missing in DB = closed day (weekends will land here)
     return { day_of_week: dow, open_time: "09:00", close_time: "17:00", enabled: false };
   });
 }
 
-
-  useEffect(() => {
-  if (!businessId) return;
-  const email = devEmail();
-
-  fetch(`${base}/businesses/${businessId}/services`, {
-    headers: { "X-User-Email": email },
-    cache: "no-store",
-  })
-    .then(async (r) => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
-    .then(setServices)
-    .catch(console.error);
-
-  fetch(`${base}/businesses/${businessId}/availability`, {
-    headers: { "X-User-Email": email },
-    cache: "no-store",
-  })
-    .then(async (r) => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
-    .then((rows: AvailabilityApi[]) => setHours(normalizeAvailability(rows)))
-    .catch(console.error);
-}, [base, businessId]);
-
-async function addService() {
-  const email = devEmail();
-  setSavingServices(true);
-  try {
-    const res = await fetch(`${base}/businesses/${businessId}/services`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-User-Email": email },
-      body: JSON.stringify({ name: "New Service", duration_min: 30 }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const created = await res.json();
-    setServices((prev) => [...prev, created]);
-  } finally {
-    setSavingServices(false);
-  }
-}
-
-async function saveServicePatch(serviceId: number, patch: Partial<{ name: string; duration_min: number }>) {
-  const email = devEmail();
-  const res = await fetch(`${base}/services/${serviceId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", "X-User-Email": email },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  const updated = await res.json();
-  setServices((prev) => prev.map((s) => (s.id === serviceId ? updated : s)));
-}
-
-async function deleteService(serviceId: number) {
-  const email = devEmail();
-  const res = await fetch(`${base}/services/${serviceId}`, {
-    method: "DELETE",
-    headers: { "X-User-Email": email },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  setServices((prev) => prev.filter((s) => s.id !== serviceId));
-}
-
-
-
-async function saveHours() {
-  const email = devEmail();
-  setSavingHours(true);
-  try {
-    const payload = hours
-      .filter((h) => h.enabled)
-      .map((h) => ({
-        day_of_week: h.day_of_week,
-        open_time: h.open_time,
-        close_time: h.close_time,
-      }));
-
-    const res = await fetch(`${base}/businesses/${businessId}/availability`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "X-User-Email": email },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) throw new Error(await res.text());
-    const updated = (await res.json()) as AvailabilityApi[];
-
-    // backend returns only rows that exist → normalize back to 7-day UI
-    setHours(normalizeAvailability(updated));
-  } finally {
-    setSavingHours(false);
-  }
-}
-
-
 type Business = { id: number; name: string; slug: string; timezone: string };
-const [biz, setBiz] = useState<Business | null>(null);
 
-useEffect(() => {
-  if (!businessId) return;
-  const email = localStorage.getItem("dev_email") ?? "test@example.com";
+export default function DashboardClient({ businessId }: { businessId: string }) {
+  const { status } = useSession();
 
-  fetch(`${base}/businesses/${businessId}`, {
-    headers: { "X-User-Email": email },
-    cache: "no-store",
-  })
-    .then(async (r) => {
-      const text = await r.text();
-      if (!r.ok) throw new Error(text);
-      return text ? JSON.parse(text) : null;
-    })
-    .then(setBiz)
-    .catch(console.error);
-}, [base, businessId]);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const { start, end } = useMemo(() => isoDayRange(date), [date]);
 
-const [copied, setCopied] = useState(false);
-function copyBookingLink() {
-  if (!biz?.slug) return;
+  const [appts, setAppts] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const url = `${window.location.origin}/b/${biz.slug}`;
-  navigator.clipboard.writeText(url).then(() => {
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  });
-}
+  const [services, setServices] = useState<Service[]>([]);
+  const [hours, setHours] = useState<HoursRow[]>([]);
+  const [savingServices, setSavingServices] = useState(false);
+  const [savingHours, setSavingHours] = useState(false);
 
-const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
-const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
+  const [biz, setBiz] = useState<Business | null>(null);
+  const [copied, setCopied] = useState(false);
 
-useEffect(() => {
-  if (!businessId) return;
-  const email = devEmail();
+  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+  const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
 
-  fetch(`${base}/businesses/${businessId}/integrations/google/status`, {
-    headers: { "X-User-Email": email },
-    cache: "no-store",
-  })
-    .then(async (r) => {
-      const text = await r.text();
-      if (!r.ok) throw new Error(text);
-      return JSON.parse(text);
-    })
-    .then((data) => {
-      setGoogleConnected(data.connected);
-      setGoogleCalendarId(data.calendar_id ?? null);
-    })
-    .catch(console.error);
-}, [base, businessId]);
+  const authed = status === "authenticated";
 
-async function connectGoogle() {
-  const email = devEmail();
-  const res = await fetch(`${base}/businesses/${businessId}/integrations/google/start`, {
-    headers: { "X-User-Email": email },
-    cache: "no-store",
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(text);
-  const data = JSON.parse(text);
-  window.location.href = data.auth_url; // redirect to Google OAuth
-}
+  // --- Appointments ---
+  useEffect(() => {
+    if (!businessId) return;
+    if (!authed) return;
 
+    setLoading(true);
+    apiFetch(
+      `/businesses/${businessId}/appointments?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    )
+      .then((res) => res.json())
+      .then(setAppts)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [businessId, start, end, authed]);
 
+  // --- Services + Availability ---
+  useEffect(() => {
+    if (!businessId) return;
+    if (!authed) return;
+
+    apiFetch(`/businesses/${businessId}/services`)
+      .then((r) => r.json())
+      .then(setServices)
+      .catch(console.error);
+
+    apiFetch(`/businesses/${businessId}/availability`)
+      .then((r) => r.json())
+      .then((rows: AvailabilityApi[]) => setHours(normalizeAvailability(rows)))
+      .catch(console.error);
+  }, [businessId, authed]);
+
+  // --- Business header info ---
+  useEffect(() => {
+    if (!businessId) return;
+    if (!authed) return;
+
+    apiFetch(`/businesses/${businessId}`)
+      .then((r) => r.json())
+      .then(setBiz)
+      .catch(console.error);
+  }, [businessId, authed]);
+
+  function copyBookingLink() {
+    if (!biz?.slug) return;
+    const url = `${window.location.origin}/b/${biz.slug}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  // --- Google integration status ---
+  useEffect(() => {
+    if (!businessId) return;
+    if (!authed) return;
+
+    apiFetch(`/businesses/${businessId}/integrations/google/status`)
+      .then((r) => r.json())
+      .then((data) => {
+        setGoogleConnected(data.connected);
+        setGoogleCalendarId(data.calendar_id ?? null);
+      })
+      .catch(console.error);
+  }, [businessId, authed]);
+
+  async function connectGoogle() {
+    const res = await apiFetch(`/businesses/${businessId}/integrations/google/start`);
+    const data = await res.json();
+    window.location.href = data.auth_url;
+  }
+
+  // --- Mutations ---
+  async function addService() {
+    setSavingServices(true);
+    try {
+      const res = await apiFetch(`/businesses/${businessId}/services`, {
+        method: "POST",
+        body: JSON.stringify({ name: "New Service", duration_min: 30 }),
+      });
+      const created = await res.json();
+      setServices((prev) => [...prev, created]);
+    } finally {
+      setSavingServices(false);
+    }
+  }
+
+  async function saveServicePatch(serviceId: number, patch: Partial<{ name: string; duration_min: number }>) {
+    const res = await apiFetch(`/services/${serviceId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    const updated = await res.json();
+    setServices((prev) => prev.map((s) => (s.id === serviceId ? updated : s)));
+  }
+
+  async function deleteService(serviceId: number) {
+    await apiFetch(`/services/${serviceId}`, { method: "DELETE" });
+    setServices((prev) => prev.filter((s) => s.id !== serviceId));
+  }
+
+  async function saveHours() {
+    setSavingHours(true);
+    try {
+      const payload = hours
+        .filter((h) => h.enabled)
+        .map((h) => ({
+          day_of_week: h.day_of_week,
+          open_time: h.open_time,
+          close_time: h.close_time,
+        }));
+
+      const res = await apiFetch(`/businesses/${businessId}/availability`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+
+      const updated = (await res.json()) as AvailabilityApi[];
+      setHours(normalizeAvailability(updated));
+    } finally {
+      setSavingHours(false);
+    }
+  }
   return (
     <main className="min-h-screen p-8">
         <div className="mx-auto max-w-4xl space-y-6">
@@ -281,7 +216,15 @@ async function connectGoogle() {
             {copied ? "Copied!" : "Copy booking link"}
           </button>
         )}
+
+        <button
+      onClick={() => signOut({ callbackUrl: "/login" })}
+      style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ccc" }}
+    >
+      Sign out
+        </button>
       </div>
+
 
       <section className="border rounded-lg p-4">
         <div className="flex items-center justify-between">
