@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///Users/saalem/schedulr-ai/apps/web/app/dashboard/layout.tsx"],"sourcesContent":["\"use client\";\n\nimport { useSession } from \"next-auth/react\";\nimport { useRouter } from \"next/navigation\";\nimport { useEffect } from \"react\";\n\nexport default function DashboardLayout({ children }: { children: React.ReactNode }) {\n  const { status } = useSession();\n  const router = useRouter();\n\n  useEffect(() => {\n    if (status === \"unauthenticated\") router.replace(\"/login\");\n  }, [status, router]);\n\n  if (status !== \"authenticated\") return null;\n  return <>{children}</>;\n}\n"],"names":[],"mappings":";;;;;AAEA;AACA;AACA;;;AAJA;;;;AAMe,SAAS,gBAAgB,EAAE,QAAQ,EAAiC;;IACjF,MAAM,EAAE,MAAM,EAAE,GAAG,IAAA,+JAAU;IAC7B,MAAM,SAAS,IAAA,iKAAS;IAExB,IAAA,yLAAS;qCAAC;YACR,IAAI,WAAW,mBAAmB,OAAO,OAAO,CAAC;QACnD;oCAAG;QAAC;QAAQ;KAAO;IAEnB,IAAI,WAAW,iBAAiB,OAAO;IACvC,qBAAO;kBAAG;;AACZ;GAVwB;;QACH,+JAAU;QACd,iKAAS;;;KAFF"}},
+    {"offset": {"line": 50, "column": 0}, "map": {"version":3,"sources":["file:///Users/saalem/schedulr-ai/apps/web/node_modules/next/navigation.js"],"sourcesContent":["module.exports = require('./dist/client/components/navigation')\n"],"names":[],"mappings":"AAAA,OAAO,OAAO","ignoreList":[0]}}]
+}

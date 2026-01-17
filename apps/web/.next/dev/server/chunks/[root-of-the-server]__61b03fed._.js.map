@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 106, "column": 0}, "map": {"version":3,"sources":["file:///Users/saalem/schedulr-ai/apps/web/app/api/auth/%5B...nextauth%5D/route.ts"],"sourcesContent":["import NextAuth from \"next-auth\";\nimport GoogleProvider from \"next-auth/providers/google\";\n\nexport const runtime = \"nodejs\";\n\nconst handler = NextAuth({\n  providers: [\n    GoogleProvider({\n      clientId: process.env.NEXTAUTH_GOOGLE_CLIENT_ID!,\n      clientSecret: process.env.NEXTAUTH_GOOGLE_CLIENT_SECRET!,\n    }),\n  ],\n  secret: process.env.NEXTAUTH_SECRET,\n});\n\nexport { handler as GET, handler as POST };\n"],"names":[],"mappings":";;;;;;;;AAAA;AACA;;;AAEO,MAAM,UAAU;AAEvB,MAAM,UAAU,IAAA,kJAAQ,EAAC;IACvB,WAAW;QACT,IAAA,gKAAc,EAAC;YACb,UAAU,QAAQ,GAAG,CAAC,yBAAyB;YAC/C,cAAc,QAAQ,GAAG,CAAC,6BAA6B;QACzD;KACD;IACD,QAAQ,QAAQ,GAAG,CAAC,eAAe;AACrC"}}]
+}
